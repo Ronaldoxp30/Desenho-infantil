@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Desenho em Tempo Real</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
+    
+        .toolbar {
+            position: fixed;
+            top: 20px;
+            left: 0;
+            right: 0;
+            display: flex;
+            flex-wrap: wrap; /* Permite que os itens da barra de ferramentas quebrem para a próxima linha */
+            justify-content: center; /* Centraliza os itens horizontalmente */
+            gap: 1px;
+            background-color: #ffffff;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            z-index: 1000; /* Garante que a barra de ferramentas esteja acima do canvas */
+        }
+    
+        .toolbar button, .toolbar input, .toolbar select {
+            padding: 10px;
+            font-size: 14px; /* Reduz um pouco o tamanho da fonte para telas menores */
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+    
+        .toolbar button i {
+            margin-right: 5px;
+        }
+    
+        .color-palette {
+            display: flex;
+            gap: 5px;
+            overflow-x: auto; /* Adiciona uma barra de rolagem horizontal caso haja muitas cores */
+        }
+    
+        .color-swatch {
+            width: 30px;
+            height: 30px;
+            border-radius: 4px;
+            cursor: pointer;
+            border: 2px solid #fff;
+            transition: transform 0.2s;
+        }
+    
+        .color-swatch:hover {
+            transform: scale(1.1);
+        }
+    
+        #canvas {
+            border: 1px solid #000;
+            background-color: #fff;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            touch-action: none; /* Evita o scroll ao desenhar no canvas */
+            max-width: 100%; /* Garante que o canvas não ultrapasse a largura máxima da tela */
+            margin-top: 20px; /* Espaçamento para evitar que a barra de ferramentas cubra o canvas */
+        }
+    
+        /* Ajustes para dispositivos móveis */
+        @media screen and (max-width: 400px) {
+            .toolbar {
+                padding: 5px; /* Reduz o padding da barra de ferramentas */
+            }
+    
+            .toolbar button, .toolbar input, .toolbar select {
+                padding: 8px; /* Reduz o padding dos botões e controles */
+            }
+    
+            .color-palette {
+                gap: 3px; /* Reduz o espaçamento entre os swatches de cores */
+            }
+    
+            .color-swatch {
+                width: 20px; /* Reduz o tamanho dos swatches de cores */
+                height: 20px;
+            }
+    
+            .toolbar select {
+                font-size: 12px; /* Reduz um pouco mais o tamanho da fonte dos selects */
+            }
+        }
+    </style>
+    
+</head>
+<body>
+    <div class="toolbar">
+        <div class="color-palette">
+            <div class="color-swatch" style="background-color: #ff0000;" data-color="#ff0000"></div>
+            <div class="color-swatch" style="background-color: #00ff00;" data-color="#00ff00"></div>
+            <div class="color-swatch" style="background-color: #0000ff;" data-color="#0000ff"></div>
+            <div class="color-swatch" style="background-color: #ffff00;" data-color="#ffff00"></div>
+            <div class="color-swatch" style="background-color: #ff00ff;" data-color="#ff00ff"></div>
+            <div class="color-swatch" style="background-color: #00ffff;" data-color="#00ffff"></div>
+            <div class="color-swatch" style="background-color: #000000;" data-color="#000000"></div>
+            <div class="color-swatch" style="background-color: #ffffff;" data-color="#ffffff"></div>
+        </div><br>
+        <select id="toolSelector" title="Escolher ferramenta"><br>
+            <option value="pencil">Lápis</option>
+            <option value="brush">Pincel</option>
+            <option value="eraser">Borracha</option>
+            <option value="line">Linha</option>
+            <option value="rectangle">Retângulo</option>
+            <option value="circle">Círculo</option>
+        </select><br>
+        <input type="range" id="toolSize" min="1" max="50" value="5" title="Tamanho da ferramenta">
+        <button id="clearButton" title="Limpar"><i class="fas fa-trash-alt"></i> Limpar</button>
+        <button id="undoButton" title="Desfazer"><i class="fas fa-undo"></i> Desfazer</button>
+        <button id="saveButton" title="Salvar"><i class="fas fa-save"></i> Salvar</button>
+    </div><br>
+    <canvas id="canvas" width="600" height="600"></canvas><br>
+    
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        let drawing = false;
+        let brushColor = '#000000';
+        let toolSize = 5;
+        let currentTool = 'pencil';
+        let startX, startY;
+        let drawingHistory = [];
+        let historyIndex = -1;
+
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mouseup', stopDrawing);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('touchstart', startDrawing);
+        canvas.addEventListener('touchend', stopDrawing);
+        canvas.addEventListener('touchmove', draw);
+
+        document.querySelectorAll('.color-swatch').forEach(swatch => {
+            swatch.addEventListener('click', (e) => {
+                brushColor = e.target.getAttribute('data-color');
+                document.querySelectorAll('.color-swatch').forEach(s => s.style.borderColor = '#fff');
+                e.target.style.borderColor = '#000';
+            });
+        });
+
+        document.getElementById('toolSelector').addEventListener('change', (e) => {
+            currentTool = e.target.value;
+            updateCursor();
+        });
+
+        document.getElementById('toolSize').addEventListener('change', (e) => {
+            toolSize = e.target.value;
+        });
+
+        document.getElementById('clearButton').addEventListener('click', () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawingHistory = [];
+            historyIndex = -1;
+            playSound('clear');
+        });
+
+        document.getElementById('undoButton').addEventListener('click', () => {
+            undo();
+            playSound('undo');
+        });
+        document.getElementById('saveButton').addEventListener('click', () => {
+            saveDrawing();
+            playSound('save');
+        });
+
+        function startDrawing(e) {
+            e.preventDefault(); // Previne comportamento padrão do toque
+            drawing = true;
+            const touch = e.touches ? e.touches[0] : e; // Obtém o toque inicial
+            [startX, startY] = [touch.clientX - canvas.offsetLeft, touch.clientY - canvas.offsetTop];
+            if (currentTool !== 'line' && currentTool !== 'rectangle' && currentTool !== 'circle') {
+                draw(e);
+            }
+            playSound('start');
+        }
+
+        function stopDrawing(e) {
+            if (!drawing) return;
+            drawing = false;
+            const touch = e.changedTouches ? e.changedTouches[0] : e; // Obtém o toque que terminou
+            if (currentTool === 'line' || currentTool === 'rectangle' || currentTool === 'circle') {
+                draw({ clientX: touch.clientX, clientY: touch.clientY }); // Chama draw com as coordenadas finais
+            }
+            ctx.beginPath();
+            saveHistory();
+            playSound('stop');
+        }
+
+        function draw(e) {
+            if (!drawing) return;
+            const touch = e.touches ? e.touches[0] : e; // Obtém o toque atual
+            const x = touch.clientX - canvas.offsetLeft;
+            const y = touch.clientY - canvas.offsetTop;
+
+            ctx.lineWidth = toolSize;
+            ctx.lineCap = 'round';
+
+            switch (currentTool) {
+                case 'eraser':
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineTo(x, y);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(x, y);
+                    break;
+                case 'brush':
+                    ctx.strokeStyle = brushColor;
+                    ctx.lineWidth = toolSize * 2;
+                    ctx.lineTo(x, y);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(x, y);
+                    break;
+                case 'pencil':
+                    ctx.strokeStyle = brushColor;
+                    ctx.lineTo(x, y);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(x, y);
+                    break;
+                case 'line':
+                    ctx.putImageData(drawingHistory[historyIndex], 0, 0);
+                    ctx.beginPath();
+                    ctx.moveTo(startX, startY);
+                    ctx.lineTo(x, y);
+                    ctx.strokeStyle = brushColor;
+                    ctx.stroke();
+                    break;
+                case 'rectangle':
+                    ctx.putImageData(drawingHistory[historyIndex], 0, 0);
+                    ctx.strokeStyle = brushColor;
+                    ctx.strokeRect(startX, startY, x - startX, y - startY);
+                    break;
+                case 'circle':
+                    ctx.putImageData(drawingHistory[historyIndex], 0, 0);
+                    ctx.strokeStyle = brushColor;
+                    ctx.beginPath();
+                    ctx.arc(startX, startY, Math.abs(x - startX), 0, Math.PI * 2);
+                    ctx.stroke();
+                    break;
+            }
+        }
+
+        function saveHistory() {
+            historyIndex++;
+            drawingHistory = drawingHistory.slice(0, historyIndex);
+            drawingHistory.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+        }
+
+        function undo() {
+            if (historyIndex <= 0) return;
+            historyIndex--;
+            ctx.putImageData(drawingHistory[historyIndex],
+            0, 0);
+        }
+
+        function saveDrawing() {
+            const link = document.createElement('a');
+            link.download = 'desenho.png';
+            link.href = canvas.toDataURL();
+            link.click();
+        }
+
+        function playSound(action) {
+            const sounds = {
+                start: 'https://www.soundjay.com/button/beep-07.wav',
+                stop: 'https://www.soundjay.com/button/beep-06.wav',
+                clear: 'https://www.soundjay.com/button/beep-09.wav',
+                undo: 'https://www.soundjay.com/button/beep-10.wav',
+                save: 'https://www.soundjay.com/button/beep-08.wav'
+            };
+            const audio = new Audio(sounds[action]);
+            audio.play();
+        }
+
+        function updateCursor() {
+            const cursors = {
+                pencil: 'url(https://img.icons8.com/ios-filled/50/000000/pencil-tip.png), auto',
+                brush: 'url(https://img.icons8.com/ios-filled/50/000000/paint-brush.png), auto',
+                eraser: 'url(https://img.icons8.com/ios-filled/50/000000/eraser.png), auto',
+                line: 'crosshair',
+                rectangle: 'crosshair',
+                circle: 'crosshair'
+            };
+            canvas.style.cursor = cursors[currentTool];
+        }
+
+        // Inicializa o histórico com o estado inicial do canvas
+        saveHistory();
+    </script>
+</body>
+</html>
+
